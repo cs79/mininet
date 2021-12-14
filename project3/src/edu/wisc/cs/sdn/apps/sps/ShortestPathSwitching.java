@@ -29,6 +29,8 @@ import net.floodlightcontroller.linkdiscovery.ILinkDiscoveryListener;
 import net.floodlightcontroller.linkdiscovery.ILinkDiscoveryService;
 import net.floodlightcontroller.routing.Link;
 
+import java.util.*;
+
 public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListener, 
 		ILinkDiscoveryListener, IDeviceListener, InterfaceShortestPathSwitching
 {
@@ -118,6 +120,74 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
      */
     private Collection<Link> getLinks()
     { return linkDiscProv.getLinks().keySet(); }
+
+    // helper function to facilitate Wikipedia pseudocode implementation of Dijkstra's
+    public IOFSwitch getMinDistElement(Set<IOFSwitch> Q, HashMap<IOFSwitch, Integer> dist) {
+        Integer minDistSeen = Integer.MAX_VALUE;
+        IOFSwitch minSwitch = null;
+        if (Q.isEmpty() == false) {
+            for (IOFSwitch s : Q) {
+                if (dist.containsKey(s)) {
+                    Integer thisDist = dist.get(s);
+                    if (thisDist < minDistSeen) {
+                        minDistSeen = thisDist;
+                        minSwitch = s;
+                    }
+                }
+            }
+        }
+        return minSwitch;
+    }
+
+    // Dijkstra's implementation, following pseudocode on Wikipedia: https://en.wikipedia.org/wiki/Dijkstra's_algorithm
+    // if something works, re-pull github version and paste into that file
+    public void ss_dijkstra(IOFSwitch source) {
+        // create vertex set Q; for us, this will be a set of switches
+        Set<IOFSwitch> Q = new HashSet<IOFSwitch>();
+        
+        // need to track the predecessor of every node in the shortest path graph and distance to it
+        HashMap<IOFSwitch, Integer> dist = new HashMap<IOFSwitch, Integer>();
+        HashMap<IOFSwitch, IOFSwitch> prev = new HashMap<IOFSwitch, IOFSwitch>();
+
+        // initialize our hash maps and Q -- use (Integer.MAX_VALUE - 1) as "INFINITY" and null as "UNDEFINED"
+        Collection<IOFSwitch> Graph = this.getSwitches().values(); // the actual switches
+        for (IOFSwitch v : Graph) {
+            dist.put(v, Integer.MAX_VALUE - 1); // make this 1 less than MAX_VALUE so we can compare in getMinDistElement
+            prev.put(v, null);
+            Q.add(v);
+        }
+        // and set distance from source to self to be 0
+        dist.put(source, 0);
+        
+        // main loop
+        while (Q.isEmpty() == false) {
+            // get vertex in Q with min dist
+            IOFSwitch u = getMinDistElement(Q, dist);
+
+            // remove u from Q
+            Q.remove(u);
+
+            // loop over neighbors
+            for (IOFSwitch v : Q) {
+                // consider all link distances to be 1 for now
+                Integer alt = dist.get(u) + 1;
+                if (alt < dist.get(v)) {
+                    dist.put(v, alt);
+                    prev.put(v, u);
+                }
+            }
+        }
+        
+        // Wikipedia says to return dist and prev here; need to consider best data structure
+        System.out.println("\nFinal dist HashMap: " + dist + "\n");
+        System.out.println("\nFinal prev HashMap: " + prev + "\n");
+    }
+
+
+    // if ss_dijkstra works, do an as_dijkstra just looping over every possible source node
+    // that one needs to return a data structure, or set it on this class I guess
+
+
 
     /**
      * Event handler called when a host joins the network.
