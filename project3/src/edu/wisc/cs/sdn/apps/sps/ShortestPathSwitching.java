@@ -275,6 +275,10 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		/* TODO: Update routing: change routing rules for all hosts          */
 
 		/*********************************************************************/
+        
+        // test Dijkstra's implementation:
+        System.out.println("\nTESTING DIJKSTRA IMPLEMENTATION:");
+        ss_dijkstra(sw);
 	}
 
 	/**
