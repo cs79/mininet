@@ -54,6 +54,27 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     // Map of hosts to devices
     private Map<IDevice,Host> knownHosts;
 
+    // simple container to store single-source Dijkstra's results
+    private class DijkstraResults {
+        // data members
+        private HashMap<IOFSwitch, Integer> dist;
+        private HashMap<IOFSwitch, IOFSwitch> prev;
+
+        // constructor
+        public DijkstraResults(HashMap<IOFSwitch, Integer> d, HashMap<IOFSwitch, IOFSwitch> p) {
+            this.dist = d;
+            this.prev = p;
+        }
+
+        public HashMap<IOFSwitch, Integer> getDist() {
+            return this.dist;
+        }
+
+        public HashMap<IOFSwitch, IOFSwitch> getPrev() {
+            return this.prev;
+        }
+    }
+
 	/**
      * Loads dependencies and initializes data structures.
      */
@@ -141,7 +162,7 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 
     // Dijkstra's implementation, following pseudocode on Wikipedia: https://en.wikipedia.org/wiki/Dijkstra's_algorithm
     // if something works, re-pull github version and paste into that file
-    public void ss_dijkstra(IOFSwitch source) {
+    public DijkstraResults ss_dijkstra(IOFSwitch source) {
         // create vertex set Q; for us, this will be a set of switches
         Set<IOFSwitch> Q = new HashSet<IOFSwitch>();
         
@@ -181,12 +202,30 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         // Wikipedia says to return dist and prev here; need to consider best data structure
         System.out.println("\nFinal dist HashMap: " + dist + "\n");
         System.out.println("\nFinal prev HashMap: " + prev + "\n");
+
+        DijkstraResults res = new DijkstraResults(dist, prev);
+        return res;
     }
 
 
     // if ss_dijkstra works, do an as_dijkstra just looping over every possible source node
     // that one needs to return a data structure, or set it on this class I guess
 
+    public HashMap<IOFSwitch, DijkstraResults> as_dijkstra() {
+        // get set of all possible source nodes (switches)
+        Collection<IOFSwitch> allSources = this.getSwitches().values();
+
+        // for each source, store Dijkstra results from single-source run in a HashMap to return
+        HashMap<IOFSwitch, DijkstraResults> res = new HashMap<IOFSwitch, DijkstraResults>();
+        for (IOFSwitch s : allSources) {
+            DijkstraResults dr = ss_dijkstra(s);
+            res.put(s, dr);
+        }
+        return res;
+    }
+
+    // if THAT works, need some way to go from map of switch -> DijkstraResults to "rules"
+    // and need to insert said "rules" into the various switches somehow
 
 
     /**
@@ -278,7 +317,17 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         
         // test Dijkstra's implementation:
         System.out.println("\nTESTING DIJKSTRA IMPLEMENTATION:");
-        ss_dijkstra(sw);
+        // ss_dijkstra(sw);
+        HashMap<IOFSwitch, DijkstraResults> test = as_dijkstra();
+        for (IOFSwitch s : test.keySet()) {
+            System.out.println("Examining result for switch " + s + "\n");
+            DijkstraResults dr = test.get(s);
+            HashMap<IOFSwitch, Integer> thisDist = dr.getDist();
+            HashMap<IOFSwitch, IOFSwitch> thisPrev = dr.getPrev();
+            System.out.println("Recovered dist: " + thisDist + "\n");
+            System.out.println("Recovered prev: " + thisPrev + "\n");
+        }
+        // seems to be ok for now...
 	}
 
 	/**
