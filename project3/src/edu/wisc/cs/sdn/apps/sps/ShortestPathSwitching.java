@@ -75,6 +75,9 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         }
     }
 
+    // map of switches to DijkstraResults (set by as_dijkstra function)
+    public HashMap<IOFSwitch, DijkstraResults> pathData;
+
 	/**
      * Loads dependencies and initializes data structures.
      */
@@ -211,17 +214,17 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     // if ss_dijkstra works, do an as_dijkstra just looping over every possible source node
     // that one needs to return a data structure, or set it on this class I guess
 
-    public HashMap<IOFSwitch, DijkstraResults> as_dijkstra() {
+    public void as_dijkstra() {
         // get set of all possible source nodes (switches)
         Collection<IOFSwitch> allSources = this.getSwitches().values();
 
-        // for each source, store Dijkstra results from single-source run in a HashMap to return
+        // for each source, store Dijkstra results from single-source run in a HashMap to set as pathData
         HashMap<IOFSwitch, DijkstraResults> res = new HashMap<IOFSwitch, DijkstraResults>();
         for (IOFSwitch s : allSources) {
             DijkstraResults dr = ss_dijkstra(s);
             res.put(s, dr);
         }
-        return res;
+        this.pathData = res;
     }
 
     // if THAT works, need some way to go from map of switch -> DijkstraResults to "rules"
@@ -318,10 +321,10 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         // test Dijkstra's implementation:
         System.out.println("\nTESTING DIJKSTRA IMPLEMENTATION:");
         // ss_dijkstra(sw);
-        HashMap<IOFSwitch, DijkstraResults> test = as_dijkstra();
-        for (IOFSwitch s : test.keySet()) {
+        as_dijkstra(); // use to set this.pathData variable
+        for (IOFSwitch s : this.pathData.keySet()) {
             System.out.println("Examining result for switch " + s + "\n");
-            DijkstraResults dr = test.get(s);
+            DijkstraResults dr = this.pathData.get(s);
             HashMap<IOFSwitch, Integer> thisDist = dr.getDist();
             HashMap<IOFSwitch, IOFSwitch> thisPrev = dr.getPrev();
             System.out.println("Recovered dist: " + thisDist + "\n");
