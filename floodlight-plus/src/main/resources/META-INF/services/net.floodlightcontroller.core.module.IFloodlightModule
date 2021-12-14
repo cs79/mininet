@@ -26,5 +26,6 @@ net.floodlightcontroller.loadbalancer.LoadBalancer
 org.sdnplatform.sync.internal.SyncManager
 org.sdnplatform.sync.internal.SyncTorture
 net.floodlightcontroller.devicemanager.internal.DefaultEntityClassifier
-edu.brown.cs.sdn.apps.sps.ShortestPathSwitching
-edu.brown.cs.sdn.apps.util.ArpServer
+edu.wisc.cs.sdn.apps.sps.ShortestPathSwitching
+edu.wisc.cs.sdn.apps.util.ArpServer
+edu.wisc.cs.sdn.apps.l3routing.L3Routing

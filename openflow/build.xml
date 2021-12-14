@@ -15,7 +15,7 @@
         <javac includeantruntime="false" srcdir="src/" destdir="bin/"
             debug = "on">
             <classpath>
-                <fileset dir="floodlight-plus/target/" 
+                <fileset dir="/home/mininet/floodlight-plus/target/" 
                     includes="floodlight.jar" />
             </classpath>
         </javac>
@@ -29,7 +29,7 @@
                 <attribute name="Class-Path" value="." />
             </manifest>
             <fileset dir="bin/" />
-            <zipgroupfileset dir="floodlight-plus/target/" 
+            <zipgroupfileset dir="/home/mininet/floodlight-plus/target/" 
                 includes="floodlight.jar" />
         </jar>
     </target>
