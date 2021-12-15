@@ -321,7 +321,22 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     }
 
     // similarly extend with a wrapper that will call the rule installer for all hosts
-    
+    // this function should be invoked whenever things get added to the network / network changes
+    public void installRulesForAllHosts() {
+        // first, call all-paths Dijkstra to make sure we are basing rules on latest paths
+        System.out.println("\nInstalling rules for all hosts - refreshing path data\n");
+        as_dijkstra();
+
+        // then call the per-host rule installation for each host
+        Collection<Host> allHosts = this.getHosts();
+        for (Host h : allHosts) {
+            installRulesForSingleHost(h);
+        }
+    }
+
+    // assuming the above works, then need a way to reset all the rules if things get deleted
+    // just call this function before any invocation of installRulesForAllHosts to be safe
+
 
     /**
      * Event handler called when a host joins the network.
@@ -408,24 +423,24 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		
 		/*********************************************************************/
 		/* TODO: Update routing: change routing rules for all hosts          */
-
 		/*********************************************************************/
         
         // test Dijkstra's implementation:
-        System.out.println("\nTESTING DIJKSTRA IMPLEMENTATION:");
-        // ss_dijkstra(sw);
-        as_dijkstra(); // use to set this.pathData variable
-        for (IOFSwitch s : this.pathData.keySet()) {
-            System.out.println("Examining result for switch " + s + "\n");
-            DijkstraResults dr = this.pathData.get(s);
-            HashMap<IOFSwitch, Integer> thisDist = dr.getDist();
-            HashMap<IOFSwitch, IOFSwitch> thisPrev = dr.getPrev();
-            System.out.println("Recovered dist: " + thisDist + "\n");
-            System.out.println("Recovered prev: " + thisPrev + "\n");
-        }
+        // System.out.println("\nTESTING DIJKSTRA IMPLEMENTATION:");
+        // // ss_dijkstra(sw);
+        // as_dijkstra(); // use to set this.pathData variable
+        // for (IOFSwitch s : this.pathData.keySet()) {
+        //     System.out.println("Examining result for switch " + s + "\n");
+        //     DijkstraResults dr = this.pathData.get(s);
+        //     HashMap<IOFSwitch, Integer> thisDist = dr.getDist();
+        //     HashMap<IOFSwitch, IOFSwitch> thisPrev = dr.getPrev();
+        //     System.out.println("Recovered dist: " + thisDist + "\n");
+        //     System.out.println("Recovered prev: " + thisPrev + "\n");
+        // }
         // seems to be ok for now...
 
         // test install implementation:
+        installRulesForAllHosts();
 	}
 
 	/**
@@ -440,8 +455,9 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		
 		/*********************************************************************/
 		/* TODO: Update routing: change routing rules for all hosts          */
-		
 		/*********************************************************************/
+
+        installRulesForAllHosts();
 	}
 
 	/**
@@ -471,8 +487,9 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		
 		/*********************************************************************/
 		/* TODO: Update routing: change routing rules for all hosts          */
-		
 		/*********************************************************************/
+
+        installRulesForAllHosts();
 	}
 
 	/**
