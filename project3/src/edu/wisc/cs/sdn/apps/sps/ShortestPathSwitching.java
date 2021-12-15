@@ -235,6 +235,25 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     // if THAT works, need some way to go from map of switch -> DijkstraResults to "rules"
     // and need to insert said "rules" into the various switches somehow
 
+    public Link getPathLink(long currentId, long nextHopId) {
+        // get all link data
+        Collection<Link> allLinks = this.getLinks();
+        Link toReturn = null;
+
+        // find the link connecting current to nextHop (assuming there is one)
+        for (Link l : allLinks) {
+            if ((currentId == l.getSrc()) && (nextHopId == l.getDst())) {
+                toReturn = l;
+            }
+        }
+
+        // warn if nothing found, then return
+        if (toReturn == null) {
+            System.out.println("WARNING: no link found connecting current / nextHop switches!");
+        }
+        return toReturn;
+    }
+
     // use same "single" / "all" pattern here that we used for Dijkstra's
     public void installRulesForSingleHost(Host h) {
         // make sure the host is on the network
@@ -254,9 +273,6 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         match.setField(OFOXMFieldType.ETH_TYPE, Ethernet.TYPE_IPv4);
         match.setField(OFOXMFieldType.ETH_DST, Ethernet.toByteArray(h.getMACAddress()));
 
-        // might need all link data as well
-        Collection<Link> links = this.getLinks();
-
         // need to traverse all switches to set rules about reaching host h
         Collection<IOFSwitch> Graph = this.getSwitches().values();
         for (IOFSwitch s : Graph) {
@@ -269,16 +285,30 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
             } else {
                 // use our pathData object to find the next hop switch on the path to our host's switch
                 DijkstraResults dr = pathData.get(s);
+                HashMap<IOFSwitch, IOFSwitch> hops = dr.getPrev();
+                IOFSwitch nextHop = hops.get(hSwitch);
+
+                // get the link connecting current switch to nextHop
+                Link connector = getPathLink(s.getId(), nextHop.getId());
+
+                // set the port in the action, as instructed
+                action.setPort(connector.getSrcPort());
+
+                // then create the OFInstructionApplyActions object containing this action
+                List<OFAction> actionsToApply = new ArrayList<OFAction>();
+                actionsToApply.add(action);
+                OFInstructionApplyActions rules = new OFInstructionApplyActions(actionsToApply);
+
 
 
                 // debug:
                 System.out.println("\nTRYING TO INSTALL RULES FOR HOST " + h + "\n");
                 System.out.println("Host h's switch: " + hSwitch);
                 System.out.println("Current switch being traversed: " + s);
-                System.out.println("DijkstraResult for current switch: ");
+                System.out.println("nextHop switch implied: " + nextHop);
+                System.out.println("\n\nDijkstraResult for current switch: ");
                 System.out.println("dist: " + dr.getDist());
                 System.out.println("prev: " + dr.getPrev()); // this probably tells us the route "towards" some key
-                System.out.println("\n\nLINKS for overall network, if this helps: \n\n" + links + "\n");
 
             }
         }
