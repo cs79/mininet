@@ -11,6 +11,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.openflow.protocol.*;
+import org.openflow.protocol.action.*;
+import org.openflow.protocol.instruction.*;
+
 import edu.wisc.cs.sdn.apps.util.Host;
 
 import net.floodlightcontroller.core.IFloodlightProviderService;
@@ -28,6 +32,7 @@ import net.floodlightcontroller.devicemanager.IDeviceService;
 import net.floodlightcontroller.linkdiscovery.ILinkDiscoveryListener;
 import net.floodlightcontroller.linkdiscovery.ILinkDiscoveryService;
 import net.floodlightcontroller.routing.Link;
+import net.floodlightcontroller.packet.*;
 
 import java.util.*;
 
@@ -203,8 +208,8 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         }
         
         // Wikipedia says to return dist and prev here; need to consider best data structure
-        System.out.println("\nFinal dist HashMap: " + dist + "\n");
-        System.out.println("\nFinal prev HashMap: " + prev + "\n");
+        // System.out.println("\nFinal dist HashMap: " + dist + "\n");
+        // System.out.println("\nFinal prev HashMap: " + prev + "\n");
 
         DijkstraResults res = new DijkstraResults(dist, prev);
         return res;
@@ -230,6 +235,55 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     // if THAT works, need some way to go from map of switch -> DijkstraResults to "rules"
     // and need to insert said "rules" into the various switches somehow
 
+    // use same "single" / "all" pattern here that we used for Dijkstra's
+    public void installRulesForSingleHost(Host h) {
+        // make sure the host is on the network
+        if (h.isAttachedToSwitch() == false) {
+            System.out.println("Host " + h + " is not on the network - cannot install rules");
+            return;
+        }
+
+        // once we are sure the host is on the network, get metadata about its connection
+        IOFSwitch hSwitch = h.getSwitch();
+        Integer hPort = h.getPort();
+
+        // create a new OFMatch object for our rule we want to install
+        OFMatch match = new OFMatch();
+        // per Wisconsin instructions, MUST set Ethernet Type before setting destination:
+        // http://pages.cs.wisc.edu/~akella/CS640/F19/assignment4/
+        match.setField(OFOXMFieldType.ETH_TYPE, Ethernet.TYPE_IPv4);
+        match.setField(OFOXMFieldType.ETH_DST, Ethernet.toByteArray(h.getMACAddress()));
+
+        // might need all link data as well
+        Collection<Link> links = this.getLinks();
+
+        // need to traverse all switches to set rules about reaching host h
+        Collection<IOFSwitch> Graph = this.getSwitches().values();
+        for (IOFSwitch s : Graph) {
+            // create an OFActionOutput object which we need to set the port # on, per instructions
+            OFActionOutput action = new OFActionOutput();
+
+            // if this is our host's switch, just use the port it is already attached to
+            if (s.getId() == hSwitch.getId()) {
+                action.setPort(hPort);
+            } else {
+                // use our pathData object to find the next hop switch on the path to our host's switch
+                DijkstraResults dr = pathData.get(s);
+
+
+                // debug:
+                System.out.println("\nTRYING TO INSTALL RULES FOR HOST " + h + "\n");
+                System.out.println("Host h's switch: " + hSwitch);
+                System.out.println("Current switch being traversed: " + s);
+                System.out.println("DijkstraResult for current switch: ");
+                System.out.println("dist: " + dr.getDist());
+                System.out.println("prev: " + dr.getPrev()); // this probably tells us the route "towards" some key
+                System.out.println("\n\nLINKS for overall network, if this helps: \n\n" + links + "\n");
+
+            }
+        }
+    }
+
 
     /**
      * Event handler called when a host joins the network.
@@ -247,8 +301,9 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 			
 			/*****************************************************************/
 			/* TODO: Update routing: add rules to route to new host          */
-			
 			/*****************************************************************/
+
+            installRulesForSingleHost(host);
 		}
 	}
 
@@ -331,6 +386,8 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
             System.out.println("Recovered prev: " + thisPrev + "\n");
         }
         // seems to be ok for now...
+
+        // test install implementation:
 	}
 
 	/**
