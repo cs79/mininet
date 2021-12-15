@@ -16,6 +16,7 @@ import org.openflow.protocol.action.*;
 import org.openflow.protocol.instruction.*;
 
 import edu.wisc.cs.sdn.apps.util.Host;
+import edu.wisc.cs.sdn.apps.util.SwitchCommands;
 
 import net.floodlightcontroller.core.IFloodlightProviderService;
 import net.floodlightcontroller.core.IOFSwitch;
@@ -299,21 +300,28 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
                 actionsToApply.add(action);
                 OFInstructionApplyActions rules = new OFInstructionApplyActions(actionsToApply);
 
-
+                // also need to subsequently install these rules in the switch - requires List<OFInstruction>
+                List<OFInstruction> rulesToAdd = new ArrayList<OFInstruction>();
+                rulesToAdd.add(rules);
+                // per instructions, use default priority and no timeouts
+                SwitchCommands.installRule(s, this.table, SwitchCommands.DEFAULT_PRIORITY, match, rulesToAdd,
+                                           SwitchCommands.NO_TIMEOUT, SwitchCommands.NO_TIMEOUT);
 
                 // debug:
-                System.out.println("\nTRYING TO INSTALL RULES FOR HOST " + h + "\n");
-                System.out.println("Host h's switch: " + hSwitch);
-                System.out.println("Current switch being traversed: " + s);
-                System.out.println("nextHop switch implied: " + nextHop);
-                System.out.println("\n\nDijkstraResult for current switch: ");
-                System.out.println("dist: " + dr.getDist());
-                System.out.println("prev: " + dr.getPrev()); // this probably tells us the route "towards" some key
+                // System.out.println("\nTRYING TO INSTALL RULES FOR HOST " + h + "\n");
+                // System.out.println("Host h's switch: " + hSwitch);
+                // System.out.println("Current switch being traversed: " + s);
+                // System.out.println("nextHop switch implied: " + nextHop);
+                // System.out.println("\n\nDijkstraResult for current switch: ");
+                // System.out.println("dist: " + dr.getDist());
+                // System.out.println("prev: " + dr.getPrev()); // this probably tells us the route "towards" some key
 
             }
         }
     }
 
+    // similarly extend with a wrapper that will call the rule installer for all hosts
+    
 
     /**
      * Event handler called when a host joins the network.
