@@ -104,8 +104,10 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         
         /*********************************************************************/
         /* TODO: Initialize other class variables, if necessary              */
-        
         /*********************************************************************/
+
+        this.pathData = new HashMap<IOFSwitch, DijkstraResults>();
+
 	}
 
 	/**
@@ -151,6 +153,21 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     private Collection<Link> getLinks()
     { return linkDiscProv.getLinks().keySet(); }
 
+    // helper function to get neighbors of a switch
+    public Set<IOFSwitch> getNeighbors(IOFSwitch source) {
+        Set<IOFSwitch> Neighbors = new HashSet<IOFSwitch>();
+        Collection<Link> Edges = this.getLinks();
+        Map<Long, IOFSwitch> Nodes = this.getSwitches();
+        for (Link e : Edges) {
+            IOFSwitch s = Nodes.get(e.getSrc());
+            IOFSwitch d = Nodes.get(e.getDst());
+            if (s == source) {
+                Neighbors.add(d);
+            }
+        }
+        return Neighbors;
+    }
+
     // helper function to facilitate Wikipedia pseudocode implementation of Dijkstra's
     public IOFSwitch getMinDistElement(Set<IOFSwitch> Q, HashMap<IOFSwitch, Integer> dist) {
         Integer minDistSeen = Integer.MAX_VALUE;
@@ -170,7 +187,6 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     }
 
     // Dijkstra's implementation, following pseudocode on Wikipedia: https://en.wikipedia.org/wiki/Dijkstra's_algorithm
-    // if something works, re-pull github version and paste into that file
     public DijkstraResults ss_dijkstra(IOFSwitch source) {
         // create vertex set Q; for us, this will be a set of switches
         Set<IOFSwitch> Q = new HashSet<IOFSwitch>();
@@ -188,6 +204,13 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         }
         // and set distance from source to self to be 0
         dist.put(source, 0);
+
+        // initialize neighbor distances to 1 (no edge weights)
+        Set<IOFSwitch> Neighbors = this.getNeighbors(source);
+        for (IOFSwitch n : Neighbors) {
+            dist.put(n, 1);
+            prev.put(n, source);
+        }
         
         // main loop
         while (Q.isEmpty() == false) {
@@ -197,13 +220,16 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
             // remove u from Q
             Q.remove(u);
 
-            // loop over neighbors
-            for (IOFSwitch v : Q) {
-                // consider all link distances to be 1 for now
-                Integer alt = dist.get(u) + 1;
-                if (alt < dist.get(v)) {
-                    dist.put(v, alt);
-                    prev.put(v, u);
+            // loop over neighbors of u that are still in Q:
+            Set<IOFSwitch> uNeighbors = this.getNeighbors(u);
+            for (IOFSwitch v : uNeighbors) {
+                if (Q.contains(v)) {
+                    // consider all link distances to be 1 for now
+                    Integer alt = dist.get(u) + 1;
+                    if (alt < dist.get(v)) {
+                        dist.put(v, alt);
+                        prev.put(v, u);
+                    }
                 }
             }
         }
@@ -226,9 +252,13 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 
         // for each source, store Dijkstra results from single-source run in a HashMap to set as pathData
         HashMap<IOFSwitch, DijkstraResults> res = new HashMap<IOFSwitch, DijkstraResults>();
+        // actually we really only need the previous map data for traversal; store this on global state:
+        HashMap<IOFSwitch, HashMap<IOFSwitch, IOFSwitch>> dpd = new HashMap<IOFSwitch, HashMap<IOFSwitch, IOFSwitch>>();
         for (IOFSwitch s : allSources) {
             DijkstraResults dr = ss_dijkstra(s);
+            HashMap<IOFSwitch, IOFSwitch> prevPath = dr.getPrev();
             res.put(s, dr);
+            dpd.put(s, prevPath);
         }
         this.pathData = res;
     }
@@ -280,43 +310,34 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
             // create an OFActionOutput object which we need to set the port # on, per instructions
             OFActionOutput action = new OFActionOutput();
 
-            // if this is our host's switch, just use the port it is already attached to
+            // set the port in the action, as instructed
             if (s.getId() == hSwitch.getId()) {
+                // if this is our host's switch, just use the port it is already attached to
                 action.setPort(hPort);
             } else {
                 // use our pathData object to find the next hop switch on the path to our host's switch
-                DijkstraResults dr = pathData.get(s);
+                DijkstraResults dr = pathData.get(hSwitch);
                 HashMap<IOFSwitch, IOFSwitch> hops = dr.getPrev();
-                IOFSwitch nextHop = hops.get(hSwitch);
+                IOFSwitch nextHop = hops.get(s);
 
                 // get the link connecting current switch to nextHop
                 Link connector = getPathLink(s.getId(), nextHop.getId());
 
-                // set the port in the action, as instructed
+                // set the port for the connection
                 action.setPort(connector.getSrcPort());
-
-                // then create the OFInstructionApplyActions object containing this action
-                List<OFAction> actionsToApply = new ArrayList<OFAction>();
-                actionsToApply.add(action);
-                OFInstructionApplyActions rules = new OFInstructionApplyActions(actionsToApply);
-
-                // also need to subsequently install these rules in the switch - requires List<OFInstruction>
-                List<OFInstruction> rulesToAdd = new ArrayList<OFInstruction>();
-                rulesToAdd.add(rules);
-                // per instructions, use default priority and no timeouts
-                SwitchCommands.installRule(s, this.table, SwitchCommands.DEFAULT_PRIORITY, match, rulesToAdd,
-                                           SwitchCommands.NO_TIMEOUT, SwitchCommands.NO_TIMEOUT);
-
-                // debug:
-                // System.out.println("\nTRYING TO INSTALL RULES FOR HOST " + h + "\n");
-                // System.out.println("Host h's switch: " + hSwitch);
-                // System.out.println("Current switch being traversed: " + s);
-                // System.out.println("nextHop switch implied: " + nextHop);
-                // System.out.println("\n\nDijkstraResult for current switch: ");
-                // System.out.println("dist: " + dr.getDist());
-                // System.out.println("prev: " + dr.getPrev()); // this probably tells us the route "towards" some key
-
             }
+
+            // then create the OFInstructionApplyActions object containing this action
+            List<OFAction> actionsToApply = new ArrayList<OFAction>();
+            actionsToApply.add(action);
+            OFInstructionApplyActions rules = new OFInstructionApplyActions(actionsToApply);
+
+            // also need to subsequently install these rules in the switch - requires List<OFInstruction>
+            List<OFInstruction> rulesToAdd = new ArrayList<OFInstruction>();
+            rulesToAdd.add(rules);
+            // per instructions, use default priority and no timeouts
+            SwitchCommands.installRule(s, this.table, SwitchCommands.DEFAULT_PRIORITY, match, rulesToAdd,
+                                        SwitchCommands.NO_TIMEOUT, SwitchCommands.NO_TIMEOUT);
         }
     }
 
@@ -325,7 +346,7 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     public void installRulesForAllHosts() {
         // first, call all-paths Dijkstra to make sure we are basing rules on latest paths
         System.out.println("\nInstalling rules for all hosts - refreshing path data\n");
-        as_dijkstra();
+        // as_dijkstra();
 
         // then call the per-host rule installation for each host
         Collection<Host> allHosts = this.getHosts();
@@ -356,6 +377,7 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 			/* TODO: Update routing: add rules to route to new host          */
 			/*****************************************************************/
 
+            as_dijkstra(); // was missing this, i think
             installRulesForSingleHost(host);
 		}
 	}
@@ -425,21 +447,8 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		/* TODO: Update routing: change routing rules for all hosts          */
 		/*********************************************************************/
         
-        // test Dijkstra's implementation:
-        // System.out.println("\nTESTING DIJKSTRA IMPLEMENTATION:");
-        // // ss_dijkstra(sw);
-        // as_dijkstra(); // use to set this.pathData variable
-        // for (IOFSwitch s : this.pathData.keySet()) {
-        //     System.out.println("Examining result for switch " + s + "\n");
-        //     DijkstraResults dr = this.pathData.get(s);
-        //     HashMap<IOFSwitch, Integer> thisDist = dr.getDist();
-        //     HashMap<IOFSwitch, IOFSwitch> thisPrev = dr.getPrev();
-        //     System.out.println("Recovered dist: " + thisDist + "\n");
-        //     System.out.println("Recovered prev: " + thisPrev + "\n");
-        // }
-        // seems to be ok for now...
-
         // test install implementation:
+        as_dijkstra();
         installRulesForAllHosts();
 	}
 
@@ -457,6 +466,7 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		/* TODO: Update routing: change routing rules for all hosts          */
 		/*********************************************************************/
 
+        as_dijkstra();
         installRulesForAllHosts();
 	}
 
@@ -489,7 +499,19 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		/* TODO: Update routing: change routing rules for all hosts          */
 		/*********************************************************************/
 
+        as_dijkstra();
+        // installRulesForAllHosts();
+
+        // allPaths = dijkstraPaths();
+		// buildAllFlowTables();
+
         installRulesForAllHosts();
+
+        // compare things
+        // System.out.println("\nallPaths: \n" + allPaths + "\n");
+        // System.out.println("\ndijkstraPathData: \n" + this.dijkstraPathData + "\n");
+
+
 	}
 
 	/**
