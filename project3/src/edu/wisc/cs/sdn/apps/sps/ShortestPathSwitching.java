@@ -60,7 +60,7 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     // Map of hosts to devices
     private Map<IDevice,Host> knownHosts;
 
-    // simple container to store single-source Dijkstra's results
+    // simple container to store single-source Dijkstra's results, based on Wikipedia pseudocode
     private class DijkstraResults {
         // data members
         private HashMap<IOFSwitch, Integer> dist;
@@ -106,8 +106,8 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         /* TODO: Initialize other class variables, if necessary              */
         /*********************************************************************/
 
+        // initialize our added data structure for Dijkstra's shortest paths
         this.pathData = new HashMap<IOFSwitch, DijkstraResults>();
-
 	}
 
 	/**
@@ -124,7 +124,6 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		
 		/*********************************************************************/
 		/* TODO: Perform other tasks, if necessary                           */
-		
 		/*********************************************************************/
 	}
 	
@@ -235,37 +234,28 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         }
         
         // Wikipedia says to return dist and prev here; need to consider best data structure
-        // System.out.println("\nFinal dist HashMap: " + dist + "\n");
-        // System.out.println("\nFinal prev HashMap: " + prev + "\n");
-
+        // pack into simple container with getters to fetch as needed
         DijkstraResults res = new DijkstraResults(dist, prev);
         return res;
     }
 
 
     // if ss_dijkstra works, do an as_dijkstra just looping over every possible source node
-    // that one needs to return a data structure, or set it on this class I guess
-
     public void as_dijkstra() {
         // get set of all possible source nodes (switches)
         Collection<IOFSwitch> allSources = this.getSwitches().values();
 
         // for each source, store Dijkstra results from single-source run in a HashMap to set as pathData
         HashMap<IOFSwitch, DijkstraResults> res = new HashMap<IOFSwitch, DijkstraResults>();
-        // actually we really only need the previous map data for traversal; store this on global state:
-        HashMap<IOFSwitch, HashMap<IOFSwitch, IOFSwitch>> dpd = new HashMap<IOFSwitch, HashMap<IOFSwitch, IOFSwitch>>();
         for (IOFSwitch s : allSources) {
             DijkstraResults dr = ss_dijkstra(s);
             HashMap<IOFSwitch, IOFSwitch> prevPath = dr.getPrev();
             res.put(s, dr);
-            dpd.put(s, prevPath);
         }
         this.pathData = res;
     }
 
-    // if THAT works, need some way to go from map of switch -> DijkstraResults to "rules"
-    // and need to insert said "rules" into the various switches somehow
-
+    // helper function to find the link connecting two switches
     public Link getPathLink(long currentId, long nextHopId) {
         // get all link data
         Collection<Link> allLinks = this.getLinks();
@@ -285,6 +275,8 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         return toReturn;
     }
 
+    // need some way to go from map of switch -> DijkstraResults to "rules"
+    // and need to insert said "rules" into the various switches somehow
     // use same "single" / "all" pattern here that we used for Dijkstra's
     public void installRulesForSingleHost(Host h) {
         // make sure the host is on the network
@@ -346,7 +338,7 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     public void installRulesForAllHosts() {
         // first, call all-paths Dijkstra to make sure we are basing rules on latest paths
         System.out.println("\nInstalling rules for all hosts - refreshing path data\n");
-        // as_dijkstra();
+        as_dijkstra();
 
         // then call the per-host rule installation for each host
         Collection<Host> allHosts = this.getHosts();
@@ -357,6 +349,28 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 
     // assuming the above works, then need a way to reset all the rules if things get deleted
     // just call this function before any invocation of installRulesForAllHosts to be safe
+    public void deleteRulesForSingleHost(Host h) {
+        // evidently the way you have to do this is with the same OFMatch object used to set the rule
+        // (per SwitchCommands.java) -- using code from installRulesForSingleHost above:
+        OFMatch match = new OFMatch();
+        match.setField(OFOXMFieldType.ETH_TYPE, Ethernet.TYPE_IPv4);
+        match.setField(OFOXMFieldType.ETH_DST, Ethernet.toByteArray(h.getMACAddress()));
+
+        // need to traverse all switches to set rules about reaching host h
+        Collection<IOFSwitch> Graph = this.getSwitches().values();
+        for (IOFSwitch s : Graph) {
+            SwitchCommands.removeRules(s, this.table, match);
+        }
+    }
+
+    // extend with wrapper to delete rules for all hosts
+    // use to reset network rules when things change (follow w/ call to install new rules)
+    public void deleteRulesForAllHosts() {
+        Collection<Host> allHosts = this.getHosts();
+        for (Host h : allHosts) {
+            deleteRulesForSingleHost(h);
+        }
+    }
 
 
     /**
@@ -377,7 +391,7 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 			/* TODO: Update routing: add rules to route to new host          */
 			/*****************************************************************/
 
-            as_dijkstra(); // was missing this, i think
+            as_dijkstra(); // need to call separately here; not wrapped
             installRulesForSingleHost(host);
 		}
 	}
@@ -401,8 +415,9 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		
 		/*********************************************************************/
 		/* TODO: Update routing: remove rules to route to host               */
-		
 		/*********************************************************************/
+
+        deleteRulesForSingleHost(host);
 	}
 
 	/**
@@ -429,8 +444,11 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		
 		/*********************************************************************/
 		/* TODO: Update routing: change rules to route to host               */
-		
 		/*********************************************************************/
+
+        deleteRulesForSingleHost(host);
+        as_dijkstra();
+        installRulesForSingleHost(host);
 	}
 	
     /**
@@ -447,8 +465,8 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		/* TODO: Update routing: change routing rules for all hosts          */
 		/*********************************************************************/
         
-        // test install implementation:
-        as_dijkstra();
+        // just refresh everything when switches change
+        deleteRulesForAllHosts();
         installRulesForAllHosts();
 	}
 
@@ -466,7 +484,8 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		/* TODO: Update routing: change routing rules for all hosts          */
 		/*********************************************************************/
 
-        as_dijkstra();
+        // just refresh everything when switches change
+        deleteRulesForAllHosts();
         installRulesForAllHosts();
 	}
 
@@ -499,19 +518,9 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 		/* TODO: Update routing: change routing rules for all hosts          */
 		/*********************************************************************/
 
-        as_dijkstra();
-        // installRulesForAllHosts();
-
-        // allPaths = dijkstraPaths();
-		// buildAllFlowTables();
-
+        // just refresh everything when links change
+        deleteRulesForAllHosts();
         installRulesForAllHosts();
-
-        // compare things
-        // System.out.println("\nallPaths: \n" + allPaths + "\n");
-        // System.out.println("\ndijkstraPathData: \n" + this.dijkstraPathData + "\n");
-
-
 	}
 
 	/**
