@@ -6,15 +6,20 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-import org.openflow.protocol.OFMessage;
-import org.openflow.protocol.OFPacketIn;
-import org.openflow.protocol.OFType;
+// import org.openflow.protocol.OFMessage;
+// import org.openflow.protocol.OFPacketIn;
+// import org.openflow.protocol.OFType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.openflow.protocol.*;
+import org.openflow.protocol.action.*;
+import org.openflow.protocol.instruction.*;
 
 import edu.wisc.cs.sdn.apps.l3routing.IL3Routing;
 import edu.wisc.cs.sdn.apps.util.ArpServer;
 
+import edu.wisc.cs.sdn.apps.util.SwitchCommands;
 import edu.wisc.cs.sdn.apps.sps.InterfaceShortestPathSwitching;
 
 import net.floodlightcontroller.core.FloodlightContext;
@@ -33,6 +38,8 @@ import net.floodlightcontroller.devicemanager.IDeviceService;
 import net.floodlightcontroller.devicemanager.internal.DeviceManagerImpl;
 import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.util.MACAddress;
+
+import java.util.*;
 
 public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		IOFMessageListener
@@ -119,6 +126,36 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		/* TODO: Perform other tasks, if necessary                           */
 		/*********************************************************************/
 	}
+
+    // helper function to install rules at a switch for handling ARP requests
+    public void installRules_ARP(IOFSwitch s) {
+        // need to iterate over our load balancers to check their virtual IPs
+        Collection<LoadBalancerInstance> lbs = instances.values();
+        for (LoadBalancerInstance lb : lbs) {
+            // follow the general pattern for creating rules used in ShortestPathSwitching
+            // match portion
+            OFMatch match = new OFMatch();
+            match.setField(OFOXMFieldType.ETH_TYPE, Ethernet.TYPE_ARP);
+            match.setField(OFOXMFieldType.ARP_TPA, lb.getVirtualIP());
+
+            // action portion
+            OFActionOutput action = new OFActionOutput();
+            action.setPort(OFPort.OFPP_CONTROLLER);
+            List<OFAction> actionsToApply = new ArrayList<OFAction>();
+            actionsToApply.add(action);
+
+            // rules
+            OFInstructionApplyActions rules = new OFInstructionApplyActions(actionsToApply);
+            List<OFInstruction> rulesToAdd = new ArrayList<OFInstruction>();
+            rulesToAdd.add(rules);
+
+            // per instructions, use default priority and no timeouts
+            SwitchCommands.installRule(s, this.table, SwitchCommands.DEFAULT_PRIORITY, match, rulesToAdd,
+                                       SwitchCommands.NO_TIMEOUT, SwitchCommands.NO_TIMEOUT);
+        }
+    }
+
+
 	
 	/**
      * Event handler called when a switch joins the network.
