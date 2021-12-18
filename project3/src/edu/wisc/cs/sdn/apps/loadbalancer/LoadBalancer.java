@@ -15,6 +15,8 @@ import org.slf4j.LoggerFactory;
 import edu.wisc.cs.sdn.apps.l3routing.IL3Routing;
 import edu.wisc.cs.sdn.apps.util.ArpServer;
 
+import edu.wisc.cs.sdn.apps.sps.InterfaceShortestPathSwitching;
+
 import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IFloodlightProviderService;
 import net.floodlightcontroller.core.IOFMessageListener;
@@ -50,8 +52,11 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
     // Interface to device manager service
     private IDeviceService deviceProv;
     
-    // Interface to L3Routing application
-    private IL3Routing l3RoutingApp;
+    // Interface to L3Routing application - per instructions, not used in this assignment
+    // private IL3Routing l3RoutingApp;
+
+    // Interface to ShortestPathSwitching application
+    private InterfaceShortestPathSwitching l3RoutingApp;
     
     // Switch table in which rules should be installed
     private byte table;
@@ -92,11 +97,10 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		this.floodlightProv = context.getServiceImpl(
 				IFloodlightProviderService.class);
         this.deviceProv = context.getServiceImpl(IDeviceService.class);
-        this.l3RoutingApp = context.getServiceImpl(IL3Routing.class);
+        this.l3RoutingApp = context.getServiceImpl(InterfaceShortestPathSwitching.class);
         
         /*********************************************************************/
         /* TODO: Initialize other class variables, if necessary              */
-        
         /*********************************************************************/
 	}
 
@@ -113,7 +117,6 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		
 		/*********************************************************************/
 		/* TODO: Perform other tasks, if necessary                           */
-		
 		/*********************************************************************/
 	}
 	
