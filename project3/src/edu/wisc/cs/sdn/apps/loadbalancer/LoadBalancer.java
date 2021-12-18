@@ -6,9 +6,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-// import org.openflow.protocol.OFMessage;
-// import org.openflow.protocol.OFPacketIn;
-// import org.openflow.protocol.OFType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,6 +17,7 @@ import edu.wisc.cs.sdn.apps.l3routing.IL3Routing;
 import edu.wisc.cs.sdn.apps.util.ArpServer;
 
 import edu.wisc.cs.sdn.apps.util.SwitchCommands;
+import edu.wisc.cs.sdn.apps.sps.ShortestPathSwitching;
 import edu.wisc.cs.sdn.apps.sps.InterfaceShortestPathSwitching;
 
 import net.floodlightcontroller.core.FloodlightContext;
@@ -70,6 +68,11 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
     
     // Set of virtual IPs and the load balancer instances they correspond with
     private Map<Integer,LoadBalancerInstance> instances;
+
+    // special priority values to give certain rules higher priority than others
+    private static final short PRIORITY_LOW  = 1;
+    private static final short PRIORITY_MED  = 2;
+    private static final short PRIORITY_HIGH = 3;
 
     /**
      * Loads dependencies and initializes data structures.
@@ -140,7 +143,7 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 
             // action portion
             OFActionOutput action = new OFActionOutput();
-            action.setPort(OFPort.OFPP_CONTROLLER);
+            action.setPort(OFPort.OFPP_CONTROLLER); // send to controller
             List<OFAction> actionsToApply = new ArrayList<OFAction>();
             actionsToApply.add(action);
 
@@ -149,12 +152,57 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
             List<OFInstruction> rulesToAdd = new ArrayList<OFInstruction>();
             rulesToAdd.add(rules);
 
-            // per instructions, use default priority and no timeouts
-            SwitchCommands.installRule(s, this.table, SwitchCommands.DEFAULT_PRIORITY, match, rulesToAdd,
+            // assume no timeout for these as not specified
+            SwitchCommands.installRule(s, this.table, this.PRIORITY_MED, match, rulesToAdd,
                                        SwitchCommands.NO_TIMEOUT, SwitchCommands.NO_TIMEOUT);
         }
     }
 
+    // helper function to install rules at a switch for handling TCP connection to virtual IPs
+    public void installRules_VIP(IOFSwitch s) {
+        // use same pattern as above
+        Collection<LoadBalancerInstance> lbs = instances.values();
+        for (LoadBalancerInstance lb : lbs) {
+            // match portion
+            OFMatch match = new OFMatch();
+            match.setField(OFOXMFieldType.ETH_TYPE, Ethernet.TYPE_IPv4);
+            match.setField(OFOXMFieldType.IPV4_DST, lb.getVirtualIP());
+
+            // action portion
+            OFActionOutput action = new OFActionOutput();
+            action.setPort(OFPort.OFPP_CONTROLLER); // send to controller
+            List<OFAction> actionsToApply = new ArrayList<OFAction>();
+            actionsToApply.add(action);
+
+            // rules
+            OFInstructionApplyActions rules = new OFInstructionApplyActions(actionsToApply);
+            List<OFInstruction> rulesToAdd = new ArrayList<OFInstruction>();
+            rulesToAdd.add(rules);
+
+            // assume no timeout for these as not specified
+            SwitchCommands.installRule(s, this.table, this.PRIORITY_MED, match, rulesToAdd,
+                                       SwitchCommands.NO_TIMEOUT, SwitchCommands.NO_TIMEOUT);
+        }
+    }
+
+    // helper function to install rules at a switch for all other packets
+    public void installRules_Others(IOFSwitch s) {
+        // match portion - OFMatch will match everything, so this will be "all else" if we set priority lower
+        // see notes about default constructor:
+        // http://pages.cs.wisc.edu/~akella/CS640/F19/assign3/floodlight-plus-doc/org/openflow/protocol/OFMatch.html
+        OFMatch match = new OFMatch();
+
+        // per instructions, "all others" packets should be sent to ShortestPathSwitching class table data member
+        OFInstructionGotoTable igt = new OFInstructionGotoTable();
+        igt.setTableId(ShortestPathSwitching.table);
+        List<OFInstruction> rulesToAdd = new ArrayList<OFInstruction>();
+        rulesToAdd.add(igt);
+
+        // set lower priority than prior rule sets as this is a catch-all -- don't want to override other matches
+        SwitchCommands.installRule(s, this.table, this.PRIORITY_LOW, match, rulesToAdd,
+                                   SwitchCommands.NO_TIMEOUT, SwitchCommands.NO_TIMEOUT);
+
+    }
 
 	
 	/**
