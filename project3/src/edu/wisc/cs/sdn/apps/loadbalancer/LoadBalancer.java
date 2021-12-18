@@ -221,8 +221,11 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		/*       balancer IP to the controller                               */
 		/*       (2) ARP packets to the controller, and                      */
 		/*       (3) all other packets to the next rule table in the switch  */
-		
 		/*********************************************************************/
+
+        installRules_VIP(sw);
+        installRules_ARP(sw);
+        installRules_Others(sw);
 	}
 	
 	/**
@@ -252,9 +255,37 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		/*       connection-specific rules to rewrite IP and MAC addresses;  */
 		/*       for all other TCP packets sent to a virtual IP, send a TCP  */
 		/*       reset; ignore all other packets                             */
-		
 		/*********************************************************************/
+
+        // handle ARP requests
+        if (ethPkt.getEtherType() == Ethernet.TYPE_ARP) {
+            // send ARP reply for ARP requests for VIPs
+
+        }
+
+        // handle TCP packets
+        if (ethPkt.getEtherType() == Ethernet.TYPE_IPv4) {
+            // make sure we are dealing with a packet sent to a virtual IP
+            IP ipPkt = (IPv4) ethPkt.getPayload();
+            int dest = ipPkt.getDestinationAddress();
+            if (this.instances.containsKey(dest)) {
+                // get TCP packet out of IP packet
+                TCP tcpPkt = (TCP) ipPkt.getPayload();
+
+                // if TCP SYN, select host and install connection-specific rules to rewrite addresses
+                if (tcpPkt.getFlags() == TCP_FLAG_SYN) {
+                    // do stuff
+
+                } else {
+                    // send TCP reset per instructions
+
+                }
+            }
+            // if not dealing with a packet bound for a virtual IP, fall through here
+        }
 		
+        // for any other packet, do nothing
+
 		return Command.CONTINUE;
 	}
 	
