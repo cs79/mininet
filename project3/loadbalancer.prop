@@ -9,9 +9,9 @@ net.floodlightcontroller.linkdiscovery.internal.LinkDiscoveryManager,\
 net.floodlightcontroller.topology.TopologyManager,\
 net.floodlightcontroller.perfmon.PktInProcessingTime,\
 edu.wisc.cs.sdn.apps.util.ArpServer,\
-edu.wisc.cs.sdn.apps.l3routing.ShortestPathSwitching,\
+edu.wisc.cs.sdn.apps.sps.ShortestPathSwitching,\
 edu.wisc.cs.sdn.apps.loadbalancer.LoadBalancer
-edu.wisc.cs.sdn.apps.l3routing.ShortestPathSwitching.table = 1
+edu.wisc.cs.sdn.apps.sps.ShortestPathSwitching.table = 1
 edu.wisc.cs.sdn.apps.loadbalancer.LoadBalancer.table = 0
 edu.wisc.cs.sdn.apps.loadbalancer.LoadBalancer.instances =\
 10.0.100.1 00:00:01:00:00:01 10.0.0.2,10.0.0.3;\
