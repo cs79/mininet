@@ -258,14 +258,109 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
     }
 
     // helper function to handle a TCP packet
-    public void handleTCP(TCP tcpPkt) {
+    // wrapping code will only call this function if the destination was a VIP
+    public void handleTCP(TCP tcpPkt, IPv4 ipv4Pkt, Ethernet ethPkt, int port, IOFSwitch s,
+                          int ipSrcAddr, int ipDstAddr, byte[] ethSrcMAC, byte[] ethDstMAC) {
+
         // if TCP SYN, select host and install connection-specific rules to rewrite addresses
         if (tcpPkt.getFlags() == TCP_FLAG_SYN) {
-            // do stuff
+            // follow similar match / action pattern used for installing rules elsewhere
 
+            // obtain new destination information from load balancer
+            LoadBalancerInstance lbi = this.instances.get(ipDstAddr);
+            int ipDstAddr_fwd = lbi.getNextHostIP();
+            byte[] MAC_fwd = getHostMACAddress(ipDstAddr_fwd);
+
+            // client to server rule
+            OFMatch match_CS = new OFMatch();
+            match_CS.setField(OFOXMFieldType.ETH_TYPE, Ethernet.TYPE_IPv4);
+            match_CS.setField(OFOXMFieldType.IPV4_SRC, ipSrcAddr);
+            match_CS.setField(OFOXMFieldType.IPV4_DST, ipDstAddr);
+            match_CS.setField(OFOXMFieldType.IP_PROTO, IPv4.PROTOCOL_TCP);
+            match_CS.setField(OFOXMFieldType.TCP_SRC, tcpPkt.getSourcePort());
+            match_CS.setField(OFOXMFieldType.TCP_DST, tcpPkt.getDestinationPort());
+            // not sure anything else is needed ?
+
+            // action portion for client to server rule
+            OFAction actionIP_CS = new OFActionSetField(OFOXMFieldType.IPV4_DST, ipDstAddr_fwd);
+            OFAction actionMAC_CS = new OFActionSetField(OFOXMFieldType.ETH_DST, MAC_fwd);
+            List<OFAction> actions_CS = new ArrayList<OFAction>();
+            actions_CS.add(actionIP_CS);
+            actions_CS.add(actionMAC_CS);
+            OFInstruction actionRules_CS = new OFInstructionApplyActions(actions_CS);
+
+            OFInstructionGotoTable igt_CS = new OFInstructionGotoTable();
+            igt_CS.setTableId(ShortestPathSwitching.table);
+            List<OFInstruction> rulesToAdd_CS = new ArrayList<OFInstruction>();
+            rulesToAdd_CS.add(actionRules_CS);
+            rulesToAdd_CS.add(igt_CS);
+
+            // install the rules for client to server
+            // per instructions, higher priority for these, and use 20-second idle timeout
+            SwitchCommands.installRule(s, this.table, this.PRIORITY_HIGH, match_CS, rulesToAdd_CS,
+                                       SwitchCommands.NO_TIMEOUT, this.IDLE_TIMEOUT);
+
+
+            // server to client rule -- update addresses
+            OFMatch match_SC = new OFMatch();
+            match_SC.setField(OFOXMFieldType.ETH_TYPE, Ethernet.TYPE_IPv4);
+            match_SC.setField(OFOXMFieldType.IPV4_SRC, ipDstAddr_fwd);
+            match_SC.setField(OFOXMFieldType.IPV4_DST, ipSrcAddr);
+            match_SC.setField(OFOXMFieldType.IP_PROTO, IPv4.PROTOCOL_TCP);
+            match_SC.setField(OFOXMFieldType.TCP_SRC, tcpPkt.getDestinationPort());
+            match_SC.setField(OFOXMFieldType.TCP_DST, tcpPkt.getSourcePort());
+
+            // action portion for server to client rule
+            OFAction actionIP_SC = new OFActionSetField(OFOXMFieldType.IPV4_SRC, ipDstAddr);
+            OFAction actionMAC_SC = new OFActionSetField(OFOXMFieldType.ETH_SRC, ethDstMAC);
+            List<OFAction> actions_SC = new ArrayList<OFAction>();
+            actions_SC.add(actionIP_SC);
+            actions_SC.add(actionMAC_SC);
+            OFInstruction actionRules_SC = new OFInstructionApplyActions(actions_SC);
+
+            OFInstructionGotoTable igt_SC = new OFInstructionGotoTable();
+            igt_SC.setTableId(ShortestPathSwitching.table);
+            List<OFInstruction> rulesToAdd_SC = new ArrayList<OFInstruction>();
+            rulesToAdd_SC.add(actionRules_SC);
+            rulesToAdd_SC.add(igt_SC);
+
+            // install the rules for client to server
+            // per instructions, higher priority for these, and use 20-second idle timeout
+            SwitchCommands.installRule(s, this.table, this.PRIORITY_HIGH, match_SC, rulesToAdd_SC,
+                                       SwitchCommands.NO_TIMEOUT, this.IDLE_TIMEOUT);
         } else {
-            // send TCP reset per instructions
+            // send TCP reset per instructions - can reuse existing packets
+            TCP tcpRst = tcpPkt;
 
+            // update fields for TCP reset reply
+            tcpRst.setSourcePort(tcpPkt.getDestinationPort());
+            tcpRst.setDestinationPort(tcpPkt.getSourcePort());
+            tcpRst.setFlags((short) 0x04); // TCP Reset flag
+            tcpRst.setSequence(tcpPkt.getAcknowledge());
+            tcpRst.setWindowSize((short) 0);
+            tcpRst.setChecksum((short) 0);
+            tcpRst.serialize();
+
+            // TCP packet needs to go inside an IPv4 packet
+            IPv4 ipv4Rst = ipv4Pkt;
+
+            // update fields for IPv4 packet
+            ipv4Rst.setSourceAddress(ipDstAddr);
+            ipv4Rst.setDestinationAddress(ipSrcAddr);
+            ipv4Rst.setChecksum((short) 0);
+            ipv4Rst.setPayload(tcpRst);
+            ipv4Rst.serialize();
+
+            // IPv4 packet neets to go inside an Ethernet packet
+            Ethernet ethRst = ethPkt;
+
+            // update fields for Ethernet packet
+            ethRst.setSourceMACAddress(ethDstMAC);
+            ethRst.setDestinationMACAddress(ethSrcMAC);
+            ethRst.setPayload(ipv4Rst);
+
+            // actually send the reset
+            SwitchCommands.sendPacket(s, (short) port, ethRst);
         }
     }
 
@@ -326,7 +421,7 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
         if (ethPkt.getEtherType() == Ethernet.TYPE_ARP) {
             // get metadata to pass through to helper function
             ARP arpPkt = (ARP) ethPkt.getPayload();
-            short pktPort = pktIn.getInPort();
+            int pktPort = pktIn.getInPort();
             byte[] ethMAC = ethPkt.getSourceMACAddress();
 
             // call helper
@@ -336,14 +431,20 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
         // handle TCP packets
         if (ethPkt.getEtherType() == Ethernet.TYPE_IPv4) {
             // make sure we are dealing with a packet sent to a virtual IP
-            IP ipPkt = (IPv4) ethPkt.getPayload();
-            int dest = ipPkt.getDestinationAddress();
-            if (this.instances.containsKey(dest)) {
+            IPv4 ipPkt = (IPv4) ethPkt.getPayload();
+            int ipDstAddr = ipPkt.getDestinationAddress();
+            if ((this.instances.containsKey(ipDstAddr)) && (ipPkt.getProtocol() == IPv4.PROTOCOL_TCP)) {
                 // get TCP packet out of IP packet
                 TCP tcpPkt = (TCP) ipPkt.getPayload();
 
+                // extract other metadata potentially needed by helper function
+                int pktPort = pktIn.getInPort();
+                int ipSrcAddr = ipPkt.getSourceAddress();
+                byte[] ethSrcMAC = ethPkt.getSourceMACAddress();
+                byte[] ethDstMAC = ethPkt.getDestinationMACAddress();
+
                 // call helper
-                handleTCP(tcpPkt);
+                handleTCP(tcpPkt, ipPkt, ethPkt, pktPort, sw, ipDstAddr, ipSrcAddr, ethDstMAC, ethSrcMAC);
             }
             // if not dealing with a packet bound for a virtual IP, fall through here
         }
