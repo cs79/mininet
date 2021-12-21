@@ -29,3 +29,4 @@ net.floodlightcontroller.devicemanager.internal.DefaultEntityClassifier
 edu.wisc.cs.sdn.apps.sps.ShortestPathSwitching
 edu.wisc.cs.sdn.apps.util.ArpServer
 edu.wisc.cs.sdn.apps.l3routing.L3Routing
+edu.wisc.cs.sdn.apps.loadbalancer.LoadBalancer
