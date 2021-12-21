@@ -35,9 +35,13 @@ import net.floodlightcontroller.devicemanager.IDevice;
 import net.floodlightcontroller.devicemanager.IDeviceService;
 import net.floodlightcontroller.devicemanager.internal.DeviceManagerImpl;
 import net.floodlightcontroller.packet.Ethernet;
+import net.floodlightcontroller.packet.ARP;
+import net.floodlightcontroller.packet.IPv4;
+import net.floodlightcontroller.packet.TCP;
 import net.floodlightcontroller.util.MACAddress;
 
 import java.util.*;
+import java.nio.ByteBuffer; // needed to extract addresses from packets
 
 public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		IOFMessageListener
@@ -204,6 +208,67 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 
     }
 
+    // helper function to handle a received ARP packet
+    public void handleARP(ARP arpPkt, int port, IOFSwitch s, byte[] em) {
+        // only want to send a reply if the destination is a virtual IP
+        // ARP packet address is just an array of bytes -- need to convert
+        // see: https://stackoverflow.com/questions/7619058/convert-a-byte-array-to-integer-in-java-and-vice-versa
+        byte[] targetAddr = arpPkt.getTargetProtocolAddress();
+        ByteBuffer wrappedTargetAddr = ByteBuffer.wrap(targetAddr);
+        int vip = wrappedTargetAddr.getInt();
+        // also check opcode on ARP packet
+        short arpOp = arpPkt.getOpCode();
+
+        // if the packet is not bound for a virtual IP (or is not an ARP Request specifically), just ignore it:
+        if (this.instances.containsKey(vip) == false || arpOp != ARP.OP_REQUEST) {
+            System.out.println("ARP packet not bound for VIP or is not a request; ignoring");
+            return;
+        }
+
+        // if arpPkt WAS bound for a VIP, send an ARP reply
+        ARP arpReply = new ARP();
+
+        // use same ByteBuffer trick to get the sender's address
+        byte[] senderAddr = arpPkt.getSenderProtocolAddress();
+        ByteBuffer wrappedSenderAddr = ByteBuffer.wrap(senderAddr);
+        int srcAddr = wrappedSenderAddr.getInt();
+
+        // set required fields here -- evidently need HW and protocol fields, + opcode
+        arpReply.setHardwareType(ARP.HW_TYPE_ETHERNET);
+        arpReply.setHardwareAddressLength((byte) Ethernet.DATALAYER_ADDRESS_LENGTH);
+        arpReply.setSenderHardwareAddress(this.instances.get(vip).getVirtualMAC());
+        arpReply.setTargetHardwareAddress(arpPkt.getSenderHardwareAddress());
+        arpReply.setProtocolType(ARP.PROTO_TYPE_IP);
+        arpReply.setProtocolAddressLength((byte) 4);
+        arpReply.setSenderProtocolAddress(vip);
+        arpReply.setTargetProtocolAddress(srcAddr);
+        arpReply.setOpCode(ARP.OP_REPLY);
+
+        // ARP packet needs to be encapsulated in an Ethernet packet
+        Ethernet ethPkt = new Ethernet();
+
+        // set fields on Ethernet packet, including ARP payload
+        ethPkt.setEtherType(Ethernet.TYPE_ARP);
+        ethPkt.setSourceMACAddress(this.instances.get(vip).getVirtualMAC());
+        ethPkt.setDestinationMACAddress(em);
+        ethPkt.setPayload(arpReply);
+
+        // now actually send the response
+        SwitchCommands.sendPacket(s, (short) port, ethPkt);
+    }
+
+    // helper function to handle a TCP packet
+    public void handleTCP(TCP tcpPkt) {
+        // if TCP SYN, select host and install connection-specific rules to rewrite addresses
+        if (tcpPkt.getFlags() == TCP_FLAG_SYN) {
+            // do stuff
+
+        } else {
+            // send TCP reset per instructions
+
+        }
+    }
+
 	
 	/**
      * Event handler called when a switch joins the network.
@@ -259,8 +324,13 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 
         // handle ARP requests
         if (ethPkt.getEtherType() == Ethernet.TYPE_ARP) {
-            // send ARP reply for ARP requests for VIPs
+            // get metadata to pass through to helper function
+            ARP arpPkt = (ARP) ethPkt.getPayload();
+            short pktPort = pktIn.getInPort();
+            byte[] ethMAC = ethPkt.getSourceMACAddress();
 
+            // call helper
+            handleARP(arpPkt, pktPort, sw, ethMAC);
         }
 
         // handle TCP packets
@@ -272,14 +342,8 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
                 // get TCP packet out of IP packet
                 TCP tcpPkt = (TCP) ipPkt.getPayload();
 
-                // if TCP SYN, select host and install connection-specific rules to rewrite addresses
-                if (tcpPkt.getFlags() == TCP_FLAG_SYN) {
-                    // do stuff
-
-                } else {
-                    // send TCP reset per instructions
-
-                }
+                // call helper
+                handleTCP(tcpPkt);
             }
             // if not dealing with a packet bound for a virtual IP, fall through here
         }
