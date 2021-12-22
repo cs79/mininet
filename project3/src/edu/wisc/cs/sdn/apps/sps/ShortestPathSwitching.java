@@ -85,6 +85,9 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     // map of switches to DijkstraResults (set by as_dijkstra function)
     public HashMap<IOFSwitch, DijkstraResults> pathData;
 
+    // in fact, we only need the previous-hop data for rules installation:
+    public HashMap<IOFSwitch, HashMap<IOFSwitch, IOFSwitch>> allPrev;
+
 	/**
      * Loads dependencies and initializes data structures.
      */
@@ -107,8 +110,9 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
         /* TODO: Initialize other class variables, if necessary              */
         /*********************************************************************/
 
-        // initialize our added data structure for Dijkstra's shortest paths
+        // initialize our added data structures for Dijkstra's shortest paths
         this.pathData = new HashMap<IOFSwitch, DijkstraResults>();
+        this.allPrev = new HashMap<IOFSwitch, HashMap<IOFSwitch, IOFSwitch>>();
 	}
 
 	/**
@@ -248,33 +252,18 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
 
         // for each source, store Dijkstra results from single-source run in a HashMap to set as pathData
         HashMap<IOFSwitch, DijkstraResults> res = new HashMap<IOFSwitch, DijkstraResults>();
+        // also capture only the prev data as a shortcut, since we don't need the weights for rules installation:
+        HashMap<IOFSwitch, HashMap<IOFSwitch, IOFSwitch>> prevData = new HashMap<IOFSwitch, HashMap<IOFSwitch, IOFSwitch>>();
         for (IOFSwitch s : allSources) {
             DijkstraResults dr = ss_dijkstra(s);
             HashMap<IOFSwitch, IOFSwitch> prevPath = dr.getPrev();
             res.put(s, dr);
+            prevData.put(s, prevPath);
         }
         this.pathData = res;
+        this.allPrev = prevData;
     }
 
-    // helper function to find the link connecting two switches
-    public Link getPathLink(long currentId, long nextHopId) {
-        // get all link data
-        Collection<Link> allLinks = this.getLinks();
-        Link toReturn = null;
-
-        // find the link connecting current to nextHop (assuming there is one)
-        for (Link l : allLinks) {
-            if ((currentId == l.getSrc()) && (nextHopId == l.getDst())) {
-                toReturn = l;
-            }
-        }
-
-        // warn if nothing found, then return
-        if (toReturn == null) {
-            System.out.println("WARNING: no link found connecting current / nextHop switches!");
-        }
-        return toReturn;
-    }
 
     // need some way to go from map of switch -> DijkstraResults to "rules"
     // and need to insert said "rules" into the various switches somehow
@@ -282,7 +271,7 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     public void installRulesForSingleHost(Host h) {
         // make sure the host is on the network
         if (h.isAttachedToSwitch() == false) {
-            System.out.println("Host " + h + " is not on the network - cannot install rules");
+            // System.out.println("Host " + h + " is not on the network - cannot install rules");
             return;
         }
 
@@ -309,15 +298,20 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
                 action.setPort(hPort);
             } else {
                 // use our pathData object to find the next hop switch on the path to our host's switch
-                DijkstraResults dr = pathData.get(hSwitch);
-                HashMap<IOFSwitch, IOFSwitch> hops = dr.getPrev();
-                IOFSwitch nextHop = hops.get(s);
+                // DijkstraResults dr = pathData.get(hSwitch);
+                // HashMap<IOFSwitch, IOFSwitch> hops = dr.getPrev();
+                // IOFSwitch nextHop = hops.get(s);
+
+                // can just directly use our new allPrev object as we only need prev data:
+                IOFSwitch nextHop = this.allPrev.get(hSwitch).get(s);
 
                 // get the link connecting current switch to nextHop
-                Link connector = getPathLink(s.getId(), nextHop.getId());
-
-                // set the port for the connection
-                action.setPort(connector.getSrcPort());
+                Collection<Link> allLinks = this.getLinks();
+                for(Link l : allLinks) {
+                    if((s.getId() == l.getSrc()) && (nextHop.getId() == l.getDst())) {
+                        action.setPort(l.getSrcPort());
+                    }
+                }
             }
 
             // then create the OFInstructionApplyActions object containing this action
@@ -338,7 +332,7 @@ public class ShortestPathSwitching implements IFloodlightModule, IOFSwitchListen
     // this function should be invoked whenever things get added to the network / network changes
     public void installRulesForAllHosts() {
         // first, call all-paths Dijkstra to make sure we are basing rules on latest paths
-        System.out.println("\nInstalling rules for all hosts - refreshing path data\n");
+        // System.out.println("\nInstalling rules for all hosts - refreshing path data\n");
         as_dijkstra();
 
         // then call the per-host rule installation for each host

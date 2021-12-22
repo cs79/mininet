@@ -221,7 +221,7 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 
         // if the packet is not bound for a virtual IP (or is not an ARP Request specifically), just ignore it:
         if (this.instances.containsKey(vip) == false || arpOp != ARP.OP_REQUEST) {
-            System.out.println("ARP packet not bound for VIP or is not a request; ignoring");
+            // System.out.println("ARP packet not bound for VIP or is not a request; ignoring");
             return;
         }
 
